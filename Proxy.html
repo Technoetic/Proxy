@@ -1,0 +1,812 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>프록시 패턴: 보안 데이터 금고</title>
+    <style>
+        :root {
+            --primary: #00f3ff;
+            --secondary: #ff0055;
+            --success: #00ff9d;
+            --bg-dark: #0a0a12;
+            --glass: rgba(255, 255, 255, 0.05);
+            --glass-border: rgba(255, 255, 255, 0.1);
+            --font-mono: 'Courier New', monospace;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            background-image:
+                radial-gradient(circle at 10% 20%, rgba(0, 243, 255, 0.1) 0%, transparent 20%),
+                radial-gradient(circle at 90% 80%, rgba(255, 0, 85, 0.1) 0%, transparent 20%);
+            color: #fff;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        /* Scanlines Effect */
+        body::after {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: repeating-linear-gradient(0deg,
+                    rgba(0, 0, 0, 0.15),
+                    rgba(0, 0, 0, 0.15) 1px,
+                    transparent 1px,
+                    transparent 2px);
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        header {
+            width: 100%;
+            padding: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--glass-border);
+            backdrop-filter: blur(10px);
+            z-index: 20;
+        }
+
+        h1 {
+            font-family: var(--font-mono);
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            font-size: 1.2rem;
+            text-shadow: 0 0 10px var(--primary);
+        }
+
+        h1 span {
+            color: var(--primary);
+        }
+
+        .container {
+            display: grid;
+            grid-template-columns: 350px 1fr;
+            gap: 20px;
+            width: 90%;
+            max-width: 1200px;
+            height: calc(100vh - 80px);
+            padding: 20px 0;
+            position: relative;
+            z-index: 5;
+        }
+
+        /* Glass Panel */
+        .glass-panel {
+            background: var(--glass);
+            border: 1px solid var(--glass-border);
+            border-radius: 16px;
+            backdrop-filter: blur(12px);
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            transition: 0.3s;
+        }
+
+        /* Terminal Sidebar */
+        .terminal-panel {
+            gap: 20px;
+        }
+
+        .terminal-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+            font-family: var(--font-mono);
+            font-size: 0.9rem;
+            color: rgba(255, 255, 255, 0.6);
+            border-bottom: 1px solid var(--glass-border);
+            padding-bottom: 10px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            background: var(--primary);
+            border-radius: 50%;
+            box-shadow: 0 0 8px var(--primary);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% {
+                opacity: 0.5;
+            }
+
+            50% {
+                opacity: 1;
+            }
+
+            100% {
+                opacity: 0.5;
+            }
+        }
+
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        label {
+            font-size: 0.8rem;
+            color: var(--primary);
+            font-family: var(--font-mono);
+        }
+
+        input {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--glass-border);
+            color: #fff;
+            padding: 12px;
+            border-radius: 8px;
+            font-family: var(--font-mono);
+            outline: none;
+            transition: 0.3s;
+        }
+
+        input:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 10px rgba(0, 243, 255, 0.2);
+        }
+
+        button {
+            background: rgba(0, 243, 255, 0.1);
+            border: 1px solid var(--primary);
+            color: var(--primary);
+            padding: 12px;
+            border-radius: 8px;
+            font-family: var(--font-mono);
+            font-weight: bold;
+            cursor: pointer;
+            transition: 0.3s;
+            text-transform: uppercase;
+            position: relative;
+            overflow: hidden;
+        }
+
+        button:hover {
+            background: var(--primary);
+            color: #000;
+            box-shadow: 0 0 20px rgba(0, 243, 255, 0.4);
+        }
+
+        button:disabled {
+            border-color: #555;
+            color: #555;
+            background: transparent;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+
+        .log-console {
+            flex-grow: 1;
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 8px;
+            padding: 12px;
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            overflow-y: auto;
+            border: 1px solid var(--glass-border);
+            position: relative;
+        }
+
+        .log-entry {
+            margin-bottom: 6px;
+            opacity: 0;
+            animation: fadeIn 0.3s forwards;
+        }
+
+        .log-time {
+            color: #666;
+            margin-right: 8px;
+        }
+
+        .log-info {
+            color: #aaa;
+        }
+
+        .log-success {
+            color: var(--success);
+        }
+
+        .log-error {
+            color: var(--secondary);
+        }
+
+        .log-warn {
+            color: #ffbd00;
+        }
+
+        @keyframes fadeIn {
+            to {
+                opacity: 1;
+            }
+        }
+
+        /* Visualization Area */
+        .stage-panel {
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .network-grid {
+            position: absolute;
+            inset: 0;
+            background-image:
+                linear-gradient(rgba(0, 243, 255, 0.05) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 243, 255, 0.05) 1px, transparent 1px);
+            background-size: 40px 40px;
+            mask-image: radial-gradient(circle at center, black 40%, transparent 90%);
+            z-index: 0;
+            transform: perspective(1000px) rotateX(10deg) scale(1.2);
+        }
+
+        .nodes-container {
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            z-index: 10;
+            height: 60%;
+            position: relative;
+        }
+
+        .node-wrapper {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 15px;
+            position: relative;
+            transition: 0.5s;
+        }
+
+        .node {
+            width: 80px;
+            height: 80px;
+            background: rgba(0, 0, 0, 0.6);
+            border: 2px solid var(--glass-border);
+            border-radius: 16px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 2rem;
+            color: #fff;
+            position: relative;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+            transition: 0.3s;
+        }
+
+        .node-label {
+            font-family: var(--font-mono);
+            font-size: 0.9rem;
+            color: #aaa;
+            letter-spacing: 1px;
+        }
+
+        /* Node States */
+        .node.client {
+            border-color: #fff;
+        }
+
+        .node.proxy {
+            border-color: var(--primary);
+            box-shadow: 0 0 15px rgba(0, 243, 255, 0.2);
+        }
+
+        .node.real-subject {
+            border-color: var(--secondary);
+            border-style: dashed;
+            opacity: 0.3;
+            filter: grayscale(1);
+        }
+
+        .node.real-subject.loading {
+            border-style: solid;
+            opacity: 0.7;
+            filter: grayscale(0.5);
+            animation: borderPulse 1s infinite alternate;
+        }
+
+        .node.real-subject.active {
+            border-style: solid;
+            opacity: 1;
+            filter: grayscale(0);
+            box-shadow: 0 0 30px rgba(255, 0, 85, 0.4);
+            background: rgba(255, 0, 85, 0.1);
+        }
+
+        @keyframes borderPulse {
+            from {
+                border-color: #555;
+            }
+
+            to {
+                border-color: var(--secondary);
+            }
+        }
+
+        /* Connections */
+        .connection {
+            position: absolute;
+            top: 50%;
+            height: 2px;
+            background: #333;
+            width: 100px;
+            /* Base width, adjust in layout */
+            transform: translateY(-50%);
+            z-index: 5;
+        }
+
+        .conn-1 {
+            left: calc(33% + 40px);
+            width: calc(33% - 80px);
+        }
+
+        /* Between 1 and 2? Simplified logic below */
+
+        .packet {
+            position: absolute;
+            width: 12px;
+            height: 12px;
+            background: #fff;
+            border-radius: 50%;
+            box-shadow: 0 0 10px #fff;
+            opacity: 0;
+            pointer-events: none;
+            z-index: 20;
+        }
+
+        /* Asset Viewer */
+        .asset-viewer {
+            margin-top: auto;
+            height: 30%;
+            background: rgba(0, 0, 0, 0.4);
+            border-top: 1px solid var(--glass-border);
+            padding: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+
+        .asset-placeholder {
+            color: #555;
+            font-family: var(--font-mono);
+            font-size: 1.5rem;
+            text-align: center;
+            animation: glitch 3s infinite;
+        }
+
+        .asset-content {
+            display: none;
+            width: 100%;
+            height: 100%;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            animation: hologram 0.5s ease-out;
+        }
+
+        .hologram-effect {
+            font-size: 3rem;
+            color: var(--secondary);
+            text-shadow: 2px 2px 0px cyan, -2px -2px 0 red;
+            font-weight: 900;
+            letter-spacing: 5px;
+            text-transform: uppercase;
+        }
+
+        .hologram-sub {
+            color: var(--primary);
+            font-family: var(--font-mono);
+            margin-top: 10px;
+        }
+
+        @keyframes hologram {
+            0% {
+                transform: scaleY(0.1) scaleX(0.5);
+                opacity: 0;
+                filter: blur(10px);
+            }
+
+            100% {
+                transform: scale(1);
+                opacity: 1;
+                filter: blur(0);
+            }
+        }
+
+        @keyframes glitch {
+            0% {
+                opacity: 0.3;
+                transform: translate(0);
+            }
+
+            2% {
+                opacity: 0.4;
+                transform: translate(2px, -2px);
+            }
+
+            4% {
+                opacity: 0.3;
+                transform: translate(0);
+            }
+
+            100% {
+                opacity: 0.3;
+            }
+        }
+
+        /* Loading Bar */
+        .loader-container {
+            position: absolute;
+            bottom: 60px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 200px;
+            height: 4px;
+            background: #333;
+            border-radius: 2px;
+            overflow: hidden;
+            opacity: 0;
+            transition: 0.3s;
+        }
+
+        .loader-bar {
+            width: 0%;
+            height: 100%;
+            background: var(--secondary);
+            box-shadow: 0 0 10px var(--secondary);
+            transition: width 0.1s linear;
+        }
+    </style>
+</head>
+
+<body>
+
+    <header>
+        <h1>Proxy <span>Pattern</span> // 볼트(Vault)</h1>
+        <div style="font-size: 0.8rem; color: #888;">시스템: 온라인</div>
+    </header>
+
+    <div class="container">
+
+        <!-- CONTROL PANEL -->
+        <aside class="glass-panel terminal-panel">
+            <div class="terminal-header">
+                <div class="status-dot"></div>
+                <span>접속 터미널</span>
+            </div>
+
+            <!-- LOGIN -->
+            <div id="login-section" class="input-group">
+                <label>보안 등급 확인 (Security Clearance)</label>
+                <input type="password" id="password-input" placeholder="액세스 코드 입력 (힌트: 'admin')" autocomplete="off">
+                <button id="btn-login">인증 시도</button>
+            </div>
+
+            <hr style="border: 0; border-top: 1px solid var(--glass-border); margin: 10px 0;">
+
+            <!-- DATA CONTROL -->
+            <div id="control-section" class="input-group" style="opacity: 0.5; pointer-events: none;">
+                <label>금고 제어 (Vault Operation)</label>
+                <div style="font-size: 0.7rem; color: #888; margin-bottom: 5px;">
+                    상태: <span id="proxy-status-text" style="color:var(--primary)">대기 중</span>
+                </div>
+                <button id="btn-fetch">초기화 및 데이터 호출</button>
+            </div>
+
+            <!-- LOGS -->
+            <div class="log-console" id="log-console">
+                <div class="log-entry"><span class="log-time">SYS</span> <span class="log-info">터미널 준비 완료. 입력 대기
+                        중...</span></div>
+            </div>
+        </aside>
+
+        <!-- VISUALIZATION -->
+        <main class="glass-panel stage-panel">
+            <div class="network-grid"></div>
+
+            <div class="nodes-container">
+                <!-- CLIENT -->
+                <div class="node-wrapper" id="node-client">
+                    <div class="node client">👤</div>
+                    <div class="node-label">클라이언트</div>
+                </div>
+
+                <!-- CONNECTION 1 -->
+                <div
+                    style="width: 100px; height: 1px; background: rgba(255,255,255,0.1); position: relative; display: flex; align-items: center;">
+                    <div class="packet" id="packet-1"></div>
+                </div>
+
+                <!-- PROXY -->
+                <div class="node-wrapper" id="node-proxy">
+                    <div class="node proxy">🛡️</div>
+                    <div class="node-label">프록시</div>
+                </div>
+
+                <!-- CONNECTION 2 -->
+                <div
+                    style="width: 100px; height: 1px; background: rgba(255,255,255,0.1); position: relative; display: flex; align-items: center;">
+                    <div class="packet" id="packet-2"></div>
+                </div>
+
+                <!-- REAL SUBJECT -->
+                <div class="node-wrapper" id="node-real">
+                    <div class="node real-subject" id="icon-real">💾</div>
+                    <div class="node-label">실제 금고</div>
+                </div>
+            </div>
+
+            <!-- Loader -->
+            <div class="loader-container" id="loader">
+                <div class="loader-bar" id="loader-bar"></div>
+            </div>
+
+            <!-- ASSET DISPLAY -->
+            <div class="asset-viewer">
+                <div class="asset-placeholder" id="asset-placeholder">
+                    [ 보안 연결됨 // 데이터 없음 ]
+                </div>
+                <div class="asset-content" id="asset-content">
+                    <div class="hologram-effect">일급 기밀</div>
+                    <div class="hologram-sub">프로젝트: 앤티그라비티</div>
+                </div>
+            </div>
+        </main>
+
+    </div>
+
+    <script>
+        // --- LOG LOGIC ---
+        function log(msg, type = 'info') {
+            const consoleEl = document.getElementById('log-console');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+
+            const timeSpan = document.createElement('span');
+            timeSpan.className = 'log-time';
+            const now = new Date();
+            timeSpan.innerText = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
+
+            const textSpan = document.createElement('span');
+            textSpan.className = `log-${type}`;
+            textSpan.innerText = msg;
+
+            entry.appendChild(timeSpan);
+            entry.appendChild(textSpan);
+            consoleEl.appendChild(entry);
+            consoleEl.scrollTop = consoleEl.scrollHeight;
+        }
+
+        // --- INTERFACE (Subject) ---
+        // Just for structure concept, JS is loosely typed.
+        class DataVault {
+            getData() { throw new Error("Method not implemented."); }
+        }
+
+        // --- REAL SUBJECT ---
+        class SecureVault extends DataVault {
+            constructor() {
+                super();
+                this.data = "TOP SECRET PAYLOAD";
+                log("실제 객체: 보안 금고 인스턴스 생성됨.", "warn");
+            }
+
+            // Simulating heavy content retrieval
+            getData(onComplete) {
+                log("실제 객체: 민감 데이터 조회 중...", "warn");
+                onComplete(this.data);
+            }
+        }
+
+        // --- PROXY ---
+        class VaultProxy extends DataVault {
+            constructor() {
+                super();
+                this.realVault = null; // Lazy loading: initially null
+                this.isAuthenticated = false;
+            }
+
+            authenticate(password) {
+                log(`프록시: 자격 증명 확인 중...`, "info");
+                if (password === 'admin') {
+                    this.isAuthenticated = true;
+                    log("프록시: 접근 허용됨.", "success");
+                    return true;
+                } else {
+                    log("프록시: 접근 거부됨. 자격 증명 실패.", "error");
+                    return false;
+                }
+            }
+
+            // Virtual Proxy Logic: Load RealSubject only when needed
+            // Protection Proxy Logic: Check authentication
+            requestData(onSuccess, onLoadingProgress) {
+                // 1. Protection Check
+                if (!this.isAuthenticated) {
+                    log("프록시: 보안 경고! 미인증 요청 차단됨.", "error");
+                    return;
+                }
+
+                // 2. Virtual Proxy Check (Caching)
+                if (this.realVault) {
+                    log("프록시: 캐시 적중. 실제 금고 이미 활성 상태.", "success");
+                    // Instant return if already loaded
+                    animateFlow(true, true, () => {
+                        this.realVault.getData(onSuccess);
+                    });
+                } else {
+                    log("프록시: 캐시 미스. 실제 금고 초기화 중...", "warn");
+                    // Need to load the heavy object
+                    animateFlow(true, false, () => {
+                        // Start heavy loading simulation
+                        this._loadHeavyResource(onSuccess, onLoadingProgress);
+                    });
+                }
+            }
+
+            _loadHeavyResource(onSuccess, onProgress) {
+                const realNode = document.getElementById('icon-real');
+                const loader = document.getElementById('loader');
+                const loaderBar = document.getElementById('loader-bar');
+
+                // UI Update: Loading State
+                realNode.classList.add('loading');
+                loader.style.opacity = 1;
+                document.getElementById('proxy-status-text').innerText = "코어 초기화 중...";
+
+                let progress = 0;
+                const interval = setInterval(() => {
+                    progress += 2; // Speed of loading
+                    if (onProgress) onProgress(progress);
+                    loaderBar.style.width = `${progress}%`;
+
+                    if (progress >= 100) {
+                        clearInterval(interval);
+
+                        // Creation of the Real Object (Lazy Load)
+                        this.realVault = new SecureVault();
+
+                        // UI Update: Active State
+                        realNode.classList.remove('loading');
+                        realNode.classList.add('active');
+                        loader.style.opacity = 0;
+                        document.getElementById('proxy-status-text').innerText = "연결 수립됨";
+
+                        // Finalize
+                        this.realVault.getData(onSuccess);
+                    }
+                }, 30); // ~1.5 seconds to load
+            }
+        }
+
+        // --- VISUALIZATION CONTROLLER ---
+        const proxy = new VaultProxy();
+
+        // DOM Elements
+        const btnLogin = document.getElementById('btn-login');
+        const passInput = document.getElementById('password-input');
+        const controlSection = document.getElementById('control-section');
+        const btnFetch = document.getElementById('btn-fetch');
+        const assetContent = document.getElementById('asset-content');
+        const assetPlaceholder = document.getElementById('asset-placeholder');
+
+        // Login Handler
+        btnLogin.addEventListener('click', () => {
+            const pass = passInput.value;
+            // Visual Animation for Login Request
+            animateFlow(true, false, () => {
+                // This callback runs after packet hits Proxy
+                const success = proxy.authenticate(pass);
+                if (success) {
+                    // Unlock Controls
+                    controlSection.style.opacity = 1;
+                    controlSection.style.pointerEvents = 'all';
+                    passInput.disabled = true;
+                    btnLogin.disabled = true;
+                    btnLogin.innerText = "인증 완료";
+                    btnLogin.style.borderColor = "var(--success)";
+                    btnLogin.style.color = "var(--success)";
+                } else {
+                    // Shake Effect?
+                    passInput.value = '';
+                    passInput.focus();
+                }
+            }, true); // Stop at Proxy
+        });
+
+        // Pass Input Enter Key
+        passInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') btnLogin.click();
+        });
+
+        // Fetch Data Handler
+        btnFetch.addEventListener('click', () => {
+            proxy.requestData(
+                (data) => {
+                    log(`클라이언트: 데이터 수신함 [${data}]`, "success");
+                    assetPlaceholder.style.display = 'none';
+                    assetContent.style.display = 'flex';
+                },
+                (progress) => {
+                    // Optional: could log progress steps
+                }
+            );
+        });
+
+        // --- ANIMATION UTILS ---
+        function animateFlow(toProxy, toReal, onComplete, stopAtProxy = false) {
+            const p1 = document.getElementById('packet-1');
+            const p2 = document.getElementById('packet-2');
+
+            // Reset
+            p1.style.transition = 'none';
+            p1.style.left = '0%';
+            p1.style.opacity = 1;
+
+            p2.style.transition = 'none';
+            p2.style.left = '0%';
+            p2.style.opacity = 0;
+
+            // Animate Client -> Proxy
+            setTimeout(() => {
+                p1.style.transition = 'left 0.5s linear, opacity 0.1s linear 0.4s';
+                p1.style.left = '100%';
+
+                setTimeout(() => {
+                    p1.style.opacity = 0; // Disappear at Proxy
+
+                    if (stopAtProxy) {
+                        if (onComplete) onComplete();
+                        return;
+                    }
+
+                    if (toReal) {
+                        // Animate Proxy -> Real
+                        p2.style.opacity = 1;
+                        setTimeout(() => {
+                            p2.style.transition = 'left 0.5s linear, opacity 0.1s linear 0.4s';
+                            p2.style.left = '100%';
+
+                            setTimeout(() => {
+                                p2.style.opacity = 0; // Disappear at Real
+                                if (onComplete) onComplete();
+                            }, 500);
+                        }, 50);
+                    } else if (onComplete) {
+                        onComplete(); // If we need to trigger 'loading' start immediately after proxy
+                    }
+
+                }, 500);
+            }, 50);
+        }
+
+    </script>
+</body>
+
+</html>
